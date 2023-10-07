@@ -3,36 +3,37 @@ import random
 import re
 from pathlib import Path
 from random import randrange
-from typing import Any, Tuple, Dict
+from typing import Any, Dict, Tuple
 
-from moviepy.editor import VideoFileClip, AudioFileClip
+import yt_dlp
+from moviepy.editor import AudioFileClip, VideoFileClip
 from moviepy.video.io.ffmpeg_tools import ffmpeg_extract_subclip
+
 from utils import settings
 from utils.console import print_step, print_substep
-import yt_dlp
 
 
 def load_background_options():
-    background_options = {}
+    _background_options = {}
     # Load background videos
-    with open("./utils/background_videos.json") as json_file:
-        background_options["video"] = json.load(json_file)
+    with open("./utils/background_videos.json", encoding='utf-8') as json_file:
+        _background_options["video"] = json.load(json_file)
 
     # Load background audios
-    with open("./utils/background_audios.json") as json_file:
-        background_options["audio"] = json.load(json_file)
+    with open("./utils/background_audios.json", encoding='utf-8') as json_file:
+        _background_options["audio"] = json.load(json_file)
 
     # Remove "__comment" from backgrounds
-    del background_options["video"]["__comment"]
-    del background_options["audio"]["__comment"]
+    del _background_options["video"]["__comment"]
+    del _background_options["audio"]["__comment"]
 
-    for name in list(background_options["video"].keys()):
-        pos = background_options["video"][name][3]
+    for name in list(_background_options["video"].keys()):
+        pos = _background_options["video"][name][3]
 
         if pos != "center":
-            background_options["video"][name][3] = lambda t: ("center", pos + t)
+            _background_options["video"][name][3] = lambda t: ("center", pos + t)
 
-    return background_options
+    return _background_options
 
 
 def get_start_and_end_times(video_length: int, length_of_clip: int) -> Tuple[int, int]:
@@ -67,6 +68,7 @@ def get_background_config(mode: str):
     # Handle default / not supported background using default option.
     # Default : pick random from supported background.
     if not choice or choice not in background_options[mode]:
+        print_substep(f"Background {choice} not in {list( background_options[mode].keys())}. Picking random background'")
         choice = random.choice(list(background_options[mode].keys()))
 
     return background_options[mode][choice]
@@ -128,7 +130,7 @@ def chop_background(background_config: Dict[str, Tuple], video_length: int, redd
     """
     id = re.sub(r"[^\w\s-]", "", reddit_object["thread_id"])
 
-    if settings.config["settings"]["background"][f"background_audio_volume"] == 0:
+    if settings.config["settings"]["background"]["background_audio_volume"] == 0:
         print_step("Volume was set to 0. Skipping background audio creation . . .")
     else:
         print_step("Finding a spot in the backgrounds audio to chop...✂️")

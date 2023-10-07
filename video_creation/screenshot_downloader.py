@@ -1,10 +1,12 @@
 import json
 import re
 from pathlib import Path
-from typing import Dict, Final
+from typing import Final
 
 import translators
-from playwright.async_api import async_playwright  # pylint: disable=unused-import
+from PIL import Image, ImageDraw
+from playwright.async_api import \
+    async_playwright  # pylint: disable=unused-import
 from playwright.sync_api import ViewportSize, sync_playwright
 from rich.progress import track
 
@@ -12,10 +14,50 @@ from utils import settings
 from utils.console import print_step, print_substep
 from utils.imagenarator import imagemaker
 from utils.playwright import clear_cookie_by_name
-
 from utils.videos import save_data
 
-__all__ = ["download_screenshots_of_reddit_posts"]
+
+def extend_image(image_path: str, x: int, y: int) -> None:
+    original_image = Image.open(image_path)
+    width, height = original_image.size
+
+    # Get the color of the very first pixel in the original image
+    first_pixel_color = original_image.getpixel((0, 0))
+
+    # Create a new image with extended dimensions
+    new_width = width + 2 * x
+    new_height = height + 2 * y
+    extended_image = Image.new("RGB", (new_width, new_height), first_pixel_color)
+
+    # Paste the original image onto the extended image with an offset
+    offset = (x, y)
+    extended_image.paste(original_image, offset)
+
+    # Save the extended image
+    extended_image.save(image_path)
+
+def make_screenshots_rounded_corners(image_path: str, radius: int) -> None:
+    screenshot = Image.open(image_path).convert("RGBA")
+
+    # The rounded corners should be transparent and crisp, like css border-radius
+    # So we need to create a mask that has the corners transparent and the rest white
+
+    # Create a mask with rounded corners
+    mask = Image.new("L", screenshot.size, 0)
+    draw = ImageDraw.Draw(mask)
+    # Draw the rounded corners
+    draw.rounded_rectangle((0, 0, screenshot.size[0], screenshot.size[1]), radius, fill=255)
+    # Make the rest of the mask white
+    draw.rectangle((radius, radius, screenshot.size[0] - radius, screenshot.size[1] - radius), fill=255)
+    # apply the mask
+    screenshot.putalpha(mask)
+
+    # save the image
+    screenshot.save(image_path)
+
+def improve_screenshot_quality(image_path: str) -> None:
+    extend_image(image_path, 20, 20)
+    make_screenshots_rounded_corners(image_path, 20)
 
 
 def get_screenshots_of_reddit_posts(reddit_object: dict, screenshot_num: int):
@@ -104,7 +146,7 @@ def get_screenshots_of_reddit_posts(reddit_object: dict, screenshot_num: int):
         page.locator('[name="password"]').fill(settings.config["reddit"]["creds"]["password"])
         page.locator("button[class$='m-full-width']").click()
         page.wait_for_timeout(5000)
-
+    
         login_error_div = page.locator(".AnimatedForm__errorMessage").first
         if login_error_div.is_visible():
             login_error_message = login_error_div.inner_text()
@@ -131,6 +173,7 @@ def get_screenshots_of_reddit_posts(reddit_object: dict, screenshot_num: int):
             page.reload()
         # Get the thread screenshot
         page.goto(reddit_object["thread_url"], timeout=0)
+        print(f"Downloading screenshots of {reddit_object['thread_url']}")
         page.set_viewport_size(ViewportSize(width=W, height=H))
         page.wait_for_load_state()
         page.wait_for_timeout(5000)
@@ -171,18 +214,19 @@ def get_screenshots_of_reddit_posts(reddit_object: dict, screenshot_num: int):
 
         postcontentpath = f"assets/temp/{reddit_id}/png/title.png"
         try:
-            if settings.config["settings"]["zoom"] != 1:
-                # store zoom settings
-                zoom = settings.config["settings"]["zoom"]
-                # zoom the body of the page
-                page.evaluate("document.body.style.zoom=" + str(zoom))
-                # as zooming the body doesn't change the properties of the divs, we need to adjust for the zoom
-                location = page.locator('[data-test-id="post-content"]').bounding_box()
-                for i in location:
-                    location[i] = float("{:.2f}".format(location[i] * zoom))
-                page.screenshot(clip=location, path=postcontentpath)
-            else:
-                page.locator('[data-test-id="post-content"]').screenshot(path=postcontentpath)
+            # store zoom settings
+            zoom = settings.config["settings"]["zoom"] or 1
+            # zoom the body of the page
+            page.evaluate("document.body.style.zoom=" + str(zoom))
+
+            # scroll post into view
+            location = page.locator('[data-testid="post-container"]').bounding_box()
+            # as zooming the body doesn't change the properties of the divs, we need to adjust for the zoom
+            for i in location:
+                location[i] = float(f"{location[i] * zoom:.2f}")
+            
+            page.screenshot(clip=location, path=postcontentpath)
+            improve_screenshot_quality(postcontentpath)
         except Exception as e:
             print_substep("Something went wrong!", style="red")
             resp = input(
@@ -250,6 +294,7 @@ def get_screenshots_of_reddit_posts(reddit_object: dict, screenshot_num: int):
                             clip=location,
                             path=f"assets/temp/{reddit_id}/png/comment_{idx}.png",
                         )
+                        improve_screenshot_quality(f"assets/temp/{reddit_id}/png/comment_{idx}.png")
                     else:
                         page.locator(f"#t1_{comment['comment_id']}").screenshot(
                             path=f"assets/temp/{reddit_id}/png/comment_{idx}.png"

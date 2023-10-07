@@ -4,6 +4,7 @@ import re
 from os.path import exists  # Needs to be imported specifically
 from typing import Final
 from typing import Tuple, Any, Dict
+import random
 
 import ffmpeg
 import translators
@@ -20,6 +21,9 @@ from utils import settings
 import tempfile
 import threading
 import time
+import spacy
+
+from video_creation.add_image_overlays import add_image_overlays
 
 console = Console()
 
@@ -174,7 +178,6 @@ def make_final_video(
                 for i in track(range(number_of_clips + 1), "Collecting the audio files...")
             ]
             audio_clips.insert(0, ffmpeg.input(f"assets/temp/{reddit_id}/mp3/title.mp3"))
-
     else:
         audio_clips = [
             ffmpeg.input(f"assets/temp/{reddit_id}/mp3/{i}.mp3") for i in range(number_of_clips)
@@ -200,70 +203,11 @@ def make_final_video(
     audio = ffmpeg.input(f"assets/temp/{reddit_id}/audio.mp3")
     final_audio = merge_background_audio(audio, reddit_id)
 
-    image_clips = list()
+    # def add_image_overlays(reddit_obj, background_clip, audio_clips_durations, number_of_clips, reddit_id, screenshot_width, opacity):
 
-    image_clips.insert(
-        0,
-        ffmpeg.input(f"assets/temp/{reddit_id}/png/title.png")["v"].filter(
-            "scale", screenshot_width, -1
-        ),
+    background_clip = add_image_overlays(
+        reddit_obj, background_clip, audio_clips_durations, number_of_clips, reddit_id, screenshot_width, opacity
     )
-
-    current_time = 0
-    if settings.config["settings"]["storymode"]:
-        audio_clips_durations = [
-            float(
-                ffmpeg.probe(f"assets/temp/{reddit_id}/mp3/postaudio-{i}.mp3")["format"]["duration"]
-            )
-            for i in range(number_of_clips)
-        ]
-        audio_clips_durations.insert(
-            0,
-            float(ffmpeg.probe(f"assets/temp/{reddit_id}/mp3/title.mp3")["format"]["duration"]),
-        )
-        if settings.config["settings"]["storymodemethod"] == 0:
-            image_clips.insert(
-                1,
-                ffmpeg.input(f"assets/temp/{reddit_id}/png/story_content.png").filter(
-                    "scale", screenshot_width, -1
-                ),
-            )
-            background_clip = background_clip.overlay(
-                image_clips[0],
-                enable=f"between(t,{current_time},{current_time + audio_clips_durations[0]})",
-                x="(main_w-overlay_w)/2",
-                y="(main_h-overlay_h)/2",
-            )
-            current_time += audio_clips_durations[0]
-        elif settings.config["settings"]["storymodemethod"] == 1:
-            for i in track(range(0, number_of_clips + 1), "Collecting the image files..."):
-                image_clips.append(
-                    ffmpeg.input(f"assets/temp/{reddit_id}/png/img{i}.png")["v"].filter(
-                        "scale", screenshot_width, -1
-                    )
-                )
-                background_clip = background_clip.overlay(
-                    image_clips[i],
-                    enable=f"between(t,{current_time},{current_time + audio_clips_durations[i]})",
-                    x="(main_w-overlay_w)/2",
-                    y="(main_h-overlay_h)/2",
-                )
-                current_time += audio_clips_durations[i]
-    else:
-        for i in range(0, number_of_clips + 1):
-            image_clips.append(
-                ffmpeg.input(f"assets/temp/{reddit_id}/png/comment_{i}.png")["v"].filter(
-                    "scale", screenshot_width, -1
-                )
-            )
-            image_overlay = image_clips[i].filter("colorchannelmixer", aa=opacity)
-            background_clip = background_clip.overlay(
-                image_overlay,
-                enable=f"between(t,{current_time},{current_time + audio_clips_durations[i]})",
-                x="(main_w-overlay_w)/2",
-                y="(main_h-overlay_h)/2",
-            )
-            current_time += audio_clips_durations[i]
 
     title = re.sub(r"[^\w\s-]", "", reddit_obj["thread_title"])
     idx = re.sub(r"[^\w\s-]", "", reddit_obj["thread_id"])
